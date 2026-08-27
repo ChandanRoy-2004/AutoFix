@@ -10,14 +10,24 @@
 
 ---
 
+## 🌐 Live Application
+
+<div align="center">
+
+[![Live Demo](https://img.shields.io/badge/▶_LAUNCH_LIVE_DEMO-00E676?style=for-the-badge&logo=googlechrome&logoColor=white&labelColor=1a1a1a)](https://your-deployment-link.com)
+
+👉 **[Experience AutoFix Live in Your Browser](https://your-deployment-link.com)** 👈
+
+*No installation required. Paste broken code and watch the self-healing multi-agent loop resolve defects in real time.*
+
+</div>
+
+---
+
 ## 🎯 The Mission
 In modern software development, the gap between Quality Assurance testing and Software Engineering often slows down delivery. **AutoFix** bridges this exact gap. 
 
 By upgrading the traditional automated testing mindset (like Selenium or TestNG) with modern LLM orchestration, this tool acts as an autonomous QA-to-Developer pipeline. It proves that testing doesn't just have to *find* bugs—it can actively *resolve* them.
-
-## 📺 Demo
-*(Pro-Tip: Record a 10-second screen recording of your UI fixing a piece of broken code, convert it to a GIF, and drop it here).*
-![AutoFix Demo](https://via.placeholder.com/800x400?text=Insert+Demo+GIF+Here)
 
 ---
 
