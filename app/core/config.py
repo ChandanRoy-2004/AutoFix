@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables or .env file."""
 
     GOOGLE_API_KEY: str = ""
-    PRIMARY_MODEL: str = "gemini-2.5-pro"
-    FAST_MODEL: str = "gemini-2.5-flash"
+    PRIMARY_MODEL: str = "gemini-3.6-flash"
+    FAST_MODEL: str = "gemini-3.6-flash"
     WORKSPACE_DIR: Path = Path("./workspace")
     MAX_HEALING_ITERATIONS: int = 3
 
