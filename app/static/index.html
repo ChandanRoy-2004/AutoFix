@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoFix - Autonomous Code Healing Pipeline</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN & Config -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Highlight.js Vibrant Theme (Atom One Dark) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- html2pdf.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Highlight.js Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+</head>
+<body class="bg-black text-zinc-100 min-h-screen font-sans antialiased selection:bg-zinc-700 selection:text-white">
+    <!-- Main Centered Container (Scaled to max-w-5xl) -->
+    <main class="max-w-5xl mx-auto pt-12 px-4 pb-20 space-y-8">
+        
+        <!-- Header -->
+        <header class="flex items-center justify-between pb-4 border-b border-zinc-800">
+            <div class="flex items-center gap-3.5">
+                <div class="w-10 h-10 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-100 flex items-center justify-center font-bold text-base shadow-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white leading-tight">AutoFix Pipeline</h1>
+                    <p class="text-sm text-zinc-400">Autonomous Multi-Agent CI/CD Self-Healing Sandbox</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 text-sm text-zinc-400">
+                <a href="/docs" target="_blank" class="hover:text-white transition flex items-center gap-1.5 font-medium">
+                    <i class="fa-solid fa-book-open"></i> API Docs
+                </a>
+            </div>
+        </header>
+
+        <!-- Section 1: Step Input -->
+        <section id="step-input" class="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-sm p-8 md:p-10 space-y-6">
+            <div>
+                <h2 class="text-2xl font-semibold text-white">Initialize Healing Pipeline</h2>
+                <p class="text-sm text-zinc-400 mt-1">Specify requirements and provide the Python script for automated testing and healing.</p>
+            </div>
+
+            <div class="space-y-2">
+                <label for="requirements" class="text-base font-medium text-white block">Functional Requirements</label>
+                <textarea 
+                    id="requirements" 
+                    rows="4" 
+                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-lg px-4 py-3 text-base font-mono placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-600 transition"
+                    placeholder="Describe expected behavior, constraints, arguments, return values, and edge cases..."
+                ></textarea>
+            </div>
+
+            <div class="space-y-2">
+                <label for="buggyCode" class="text-base font-medium text-white block">Buggy Python Code</label>
+                <textarea 
+                    id="buggyCode" 
+                    rows="10" 
+                    class="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-lg px-4 py-3 text-base font-mono placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-600 transition"
+                    placeholder="def calculate_total(items, tax_rate):&#10;    # Buggy code here&#10;    pass"
+                ></textarea>
+            </div>
+
+            <div class="pt-2 flex items-center justify-between">
+                <button 
+                    id="startBtn" 
+                    class="bg-zinc-100 text-black hover:bg-zinc-300 rounded-lg px-6 py-3 text-base font-semibold transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                    <i class="fa-solid fa-play text-sm"></i>
+                    <span>Run AutoFix</span>
+                </button>
+                <span id="inputStatus" class="text-sm text-rose-400 font-medium"></span>
+            </div>
+        </section>
+
+        <!-- Section 2: Step Execution -->
+        <section id="step-execution" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl shadow-sm p-8 md:p-10 space-y-6">
+            <div class="flex items-center justify-between border-b border-zinc-800 pb-5">
+                <div class="flex items-center gap-3.5">
+                    <div class="w-5 h-5 border-2 border-zinc-100 border-t-transparent rounded-full animate-spin"></div>
+                    <h2 class="text-2xl font-semibold text-white">Agents Executing...</h2>
+                </div>
+                <span class="text-xs font-semibold uppercase tracking-wider text-zinc-400 bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-700">Live Sandbox Trace</span>
+            </div>
+
+            <div 
+                id="logContainer" 
+                class="bg-black text-emerald-400 font-mono text-sm p-5 rounded-lg h-96 overflow-y-auto space-y-2 border border-zinc-800"
+            >
+                <div class="text-zinc-500 italic">Initializing pipeline...</div>
+            </div>
+        </section>
+
+        <!-- Section 3: Step Results -->
+        <section id="step-results" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl shadow-sm p-8 md:p-10 space-y-6">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-5 border-b border-zinc-800 pb-5">
+                <div>
+                    <h2 id="resultTitle" class="text-2xl font-semibold text-white">Pipeline Complete</h2>
+                    <p id="resultSubtitle" class="text-sm text-zinc-400 mt-1">Autonomous repair verified against generated test suite.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button 
+                        id="downloadPdfBtn" 
+                        class="bg-zinc-100 text-black hover:bg-zinc-300 rounded-lg px-6 py-3 text-base font-semibold transition-colors flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>Download PDF Report</span>
+                    </button>
+                    <button 
+                        id="copyBtn" 
+                        class="bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-zinc-100 rounded-lg px-6 py-3 text-base font-semibold transition-colors flex items-center gap-2 cursor-pointer"
+                    >
+                        <i class="fa-regular fa-copy"></i>
+                        <span>Copy Code</span>
+                    </button>
+                    <button 
+                        id="resetBtn" 
+                        class="bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-zinc-100 rounded-lg px-6 py-3 text-base font-semibold transition-colors flex items-center gap-2 cursor-pointer"
+                    >
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>Start New</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <label class="text-base font-medium text-white block">Healed Code</label>
+                <pre class="bg-zinc-950 rounded-lg border border-zinc-800 overflow-x-auto text-base"><code id="healedCode" class="language-python rounded-lg border border-zinc-800 font-mono"></code></pre>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- App JavaScript -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
