@@ -31,6 +31,8 @@
     <!-- Highlight.js Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/csharp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
 </head>
 <body class="bg-black text-zinc-100 min-h-screen font-sans antialiased selection:bg-zinc-700 selection:text-white">
     <!-- Main Centered Container (Scaled to max-w-5xl) -->
@@ -58,7 +60,16 @@
         <section id="step-input" class="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-sm p-8 md:p-10 space-y-6">
             <div>
                 <h2 class="text-2xl font-semibold text-white">Initialize Healing Pipeline</h2>
-                <p class="text-sm text-zinc-400 mt-1">Specify requirements and provide the Python script for automated testing and healing.</p>
+                <p class="text-sm text-zinc-400 mt-1">Specify requirements and provide the source code for automated testing and healing.</p>
+            </div>
+
+            <div class="mb-4">
+                <label for="languageSelect" class="block text-sm font-medium text-zinc-300 mb-2">Programming Language</label>
+                <select id="languageSelect" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-zinc-100 focus:ring-2 focus:ring-zinc-600 focus:outline-none font-sans">
+                    <option value="python">Python (pytest)</option>
+                    <option value="csharp">C# (.NET Core / xUnit)</option>
+                    <option value="java">Java (Maven / JUnit 5)</option>
+                </select>
             </div>
 
             <div class="space-y-2">

@@ -7,9 +7,12 @@ venv/
 env/
 ENV/
 
-# Environment Variables
+# Environment Variables & Secrets
 .env
 .env.local
+secrets/
+*.pem
+
 
 # Sandbox Workspace Execution Files
 workspace/*

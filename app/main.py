@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api import github_routes
 from app.api.routes import router
 
 app = FastAPI(title="AutoFix API", version="1.0.0")
@@ -19,8 +20,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router
+# Include API routers
 app.include_router(router, prefix="/api")
+app.include_router(github_routes.router, prefix="/api", tags=["GitHub Webhook"])
+
+
 
 # Ensure static directory and index.html exist
 static_dir = Path("app/static")

@@ -3,6 +3,7 @@ const stepInput = document.getElementById('step-input');
 const stepExecution = document.getElementById('step-execution');
 const stepResults = document.getElementById('step-results');
 
+const languageSelect = document.getElementById('languageSelect');
 const requirementsInput = document.getElementById('requirements');
 const buggyCodeInput = document.getElementById('buggyCode');
 const startBtn = document.getElementById('startBtn');
@@ -15,10 +16,18 @@ const downloadPdfBtn = document.getElementById('downloadPdfBtn');
 const copyBtn = document.getElementById('copyBtn');
 const resetBtn = document.getElementById('resetBtn');
 
+// Language Code Templates
+const CODE_TEMPLATES = {
+    python: 'def calculate_total(items, tax_rate):\n    # Buggy code here\n    pass',
+    csharp: 'public class Solution {\n    // Buggy C# method\n}',
+    java: 'public class Solution {\n    // Buggy Java method\n}',
+};
+
 // Global State
 let latestResponseData = null;
 let savedRequirements = '';
 let savedBuggyCode = '';
+let savedLanguage = 'python';
 
 // Helper: Escape HTML special characters
 function escapeHtml(text) {
@@ -69,26 +78,52 @@ function appendLog(stepName, message, timestamp) {
     logContainer.scrollTop = logContainer.scrollHeight;
 }
 
-// Event Listener: Run AutoFix Button
-startBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
+// Helper: Map language to Highlight.js CSS class
+function getHighlightLanguageClass(language) {
+    const lang = (language || 'python').toLowerCase().trim();
+    if (lang === 'csharp' || lang === 'c#' || lang === 'dotnet') {
+        return 'language-csharp';
+    } else if (lang === 'java') {
+        return 'language-java';
+    }
+    return 'language-python';
+}
+
+// Event Listener: Language selection change
+if (languageSelect) {
+    languageSelect.addEventListener('change', () => {
+        const selected = languageSelect.value;
+        const currentVal = buggyCodeInput.value.trim();
+        const isDefaultTemplate = Object.values(CODE_TEMPLATES).some(t => t.trim() === currentVal);
+
+        if (!currentVal || isDefaultTemplate) {
+            buggyCodeInput.value = CODE_TEMPLATES[selected] || '';
+        }
+    });
+}
+
+// Main Submit Handler
+async function handleAutoFixSubmit(e) {
+    if (e) e.preventDefault();
 
     const requirements = requirementsInput.value.trim();
     const buggyCode = buggyCodeInput.value.trim();
+    const selectedLanguage = languageSelect ? languageSelect.value : 'python';
 
     if (!requirements || !buggyCode) {
-        alert('Please provide both functional requirements and buggy Python code.');
+        alert('Please provide both functional requirements and source code.');
         return;
     }
 
     // Save inputs for report generation
     savedRequirements = requirements;
     savedBuggyCode = buggyCode;
+    savedLanguage = selectedLanguage;
 
     // Transition to execution view
     showStep('step-execution');
     logContainer.innerHTML = '';
-    appendLog('INIT', 'Initializing Multi-Agent Sandbox...');
+    appendLog('INIT', `Initializing Multi-Agent Sandbox for ${selectedLanguage.toUpperCase()}...`);
 
     try {
         const response = await fetch('/api/heal', {
@@ -97,6 +132,7 @@ startBtn.addEventListener('click', async (e) => {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
+                language: selectedLanguage,
                 requirements: requirements,
                 buggy_code: buggyCode,
             }),
@@ -117,8 +153,11 @@ startBtn.addEventListener('click', async (e) => {
             });
         }
 
-        // Set Healed Code
-        healedCode.textContent = data.final_code || '# No healed code returned';
+        // Apply dynamic syntax highlighting for healed code
+        const langClass = getHighlightLanguageClass(data.language || selectedLanguage);
+        healedCode.className = `${langClass} rounded-lg border border-zinc-800 font-mono`;
+        healedCode.textContent = data.final_code || '// No healed code returned';
+
         if (window.hljs) {
             hljs.highlightElement(healedCode);
         }
@@ -126,10 +165,10 @@ startBtn.addEventListener('click', async (e) => {
         // Update Results Title
         if (data.success) {
             resultTitle.textContent = `Pipeline Complete — Passed in ${data.iterations_used} iteration(s)`;
-            resultTitle.className = 'text-lg font-semibold tracking-tight text-emerald-600';
+            resultTitle.className = 'text-2xl font-semibold text-emerald-400';
         } else {
             resultTitle.textContent = `Pipeline Complete — Unresolved after ${data.iterations_used} iteration(s)`;
-            resultTitle.className = 'text-lg font-semibold tracking-tight text-amber-600';
+            resultTitle.className = 'text-2xl font-semibold text-amber-400';
         }
 
         // Wait 1.5 seconds for UX so the user can see final logs
@@ -142,8 +181,11 @@ startBtn.addEventListener('click', async (e) => {
         appendLog('ERROR', `Pipeline execution failed: ${err.message}`);
         
         resultTitle.textContent = 'Pipeline Failed';
-        resultTitle.className = 'text-lg font-semibold tracking-tight text-rose-600';
-        healedCode.textContent = `# Error occurred during healing:\n# ${err.message}`;
+        resultTitle.className = 'text-2xl font-semibold text-rose-400';
+        
+        const langClass = getHighlightLanguageClass(selectedLanguage);
+        healedCode.className = `${langClass} rounded-lg border border-zinc-800 font-mono`;
+        healedCode.textContent = `// Error occurred during healing:\n// ${err.message}`;
         if (window.hljs) {
             hljs.highlightElement(healedCode);
         }
@@ -152,7 +194,10 @@ startBtn.addEventListener('click', async (e) => {
             showStep('step-results');
         }, 1500);
     }
-});
+}
+
+// Event Listener: Run AutoFix Button
+startBtn.addEventListener('click', handleAutoFixSubmit);
 
 // Event Listener: Copy Code Button
 copyBtn.addEventListener('click', async () => {
@@ -162,7 +207,7 @@ copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(code);
         const originalContent = copyBtn.innerHTML;
-        copyBtn.innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i><span>Copied!</span>';
+        copyBtn.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i><span>Copied!</span>';
         setTimeout(() => {
             copyBtn.innerHTML = originalContent;
         }, 2000);
@@ -174,7 +219,8 @@ copyBtn.addEventListener('click', async () => {
 // Event Listener: Reset / Start New Button
 resetBtn.addEventListener('click', () => {
     requirementsInput.value = '';
-    buggyCodeInput.value = '';
+    const selected = languageSelect ? languageSelect.value : 'python';
+    buggyCodeInput.value = CODE_TEMPLATES[selected] || '';
     latestResponseData = null;
     savedRequirements = '';
     savedBuggyCode = '';
@@ -187,6 +233,8 @@ downloadPdfBtn.addEventListener('click', () => {
         alert('No report data available to download.');
         return;
     }
+
+    const reportLang = (latestResponseData.language || savedLanguage || 'python').toUpperCase();
 
     // Format logs for PDF
     const logsHtml = (latestResponseData.logs || [])
@@ -212,6 +260,7 @@ downloadPdfBtn.addEventListener('click', () => {
             <h1 style="font-size: 22px; font-weight: bold; margin: 0 0 4px 0; color: #0f172a;">AutoFix Execution Report</h1>
             <p style="font-size: 11px; color: #64748b; margin: 0;">
                 Generated: ${new Date().toLocaleString()} &bull; 
+                Language: <strong>${escapeHtml(reportLang)}</strong> &bull;
                 Status: <strong>${latestResponseData.success ? 'PASSED ✅' : 'FAILED ❌'}</strong> &bull; 
                 Iterations: ${latestResponseData.iterations_used}
             </p>
@@ -235,7 +284,7 @@ downloadPdfBtn.addEventListener('click', () => {
     // Configure and invoke html2pdf
     const options = {
         margin: 10,
-        filename: 'AutoFix_Report.pdf',
+        filename: `AutoFix_${reportLang}_Report.pdf`,
         html2canvas: { scale: 2 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
