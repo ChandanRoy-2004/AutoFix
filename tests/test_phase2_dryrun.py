@@ -10,7 +10,8 @@ if str(BASE_DIR) not in sys.path:
 
 from app.agents.healer import generate_code_patch
 from app.agents.test_engineer import generate_test_suite
-from app.services.sandbox import clean_sandbox, run_pytest, write_file
+from app.core.config import settings
+from app.services.sandboxes import get_sandbox
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,6 +24,8 @@ async def main():
     print("=" * 70)
     print("🚀 AutoFix Phase 2 Multi-Agent Dry Run")
     print("=" * 70)
+
+    sandbox = get_sandbox("python")
 
     # 1. Intentional Bug Scenario
     buggy_code = """def calculate_average(numbers: list[float]) -> float:
@@ -51,15 +54,19 @@ async def main():
 
     # Step 2: Write target and test files into isolated sandbox
     print("--- Step 2: Writing files to Sandbox ---")
-    clean_sandbox()
-    p_target = write_file("target.py", buggy_code)
-    p_test = write_file("test_target.py", test_code)
-    print(f"Wrote target: {p_target}")
-    print(f"Wrote test suite: {p_test}")
+    sandbox.clean(settings.WORKSPACE_DIR)
+    sandbox.write_files(
+        settings.WORKSPACE_DIR,
+        {
+            "target.py": buggy_code,
+            "test_target.py": test_code,
+        },
+    )
+    print(f"Wrote files to sandbox: {settings.WORKSPACE_DIR}")
 
     # Step 3: Run Initial Pytest Execution (Expected to Fail)
     print("\n--- Step 3: Initial Sandbox Run (Expecting Failures) ---")
-    initial_passed, initial_output = run_pytest(timeout_seconds=15)
+    initial_passed, initial_output = sandbox.run_tests(settings.WORKSPACE_DIR, timeout=15)
     print(f"Initial Test Result -> Passed: {initial_passed}")
     print(f"Initial Output/Traceback:\n{initial_output}\n")
     assert not initial_passed, "Expected initial buggy code to fail generated tests"
@@ -76,8 +83,8 @@ async def main():
 
     # Step 5: Overwrite sandbox target.py and re-run tests
     print("--- Step 5: Verification Sandbox Run with Patched Code ---")
-    write_file("target.py", healed_code)
-    final_passed, final_output = run_pytest(timeout_seconds=15)
+    sandbox.write_files(settings.WORKSPACE_DIR, {"target.py": healed_code})
+    final_passed, final_output = sandbox.run_tests(settings.WORKSPACE_DIR, timeout=15)
     print(f"Final Test Result -> Passed: {final_passed}")
     print(f"Final Output:\n{final_output}\n")
 

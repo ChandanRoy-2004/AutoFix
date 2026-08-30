@@ -1,3 +1,15 @@
-from app.models.schemas import HealRequest, HealResponse, LogEntry
+from app.models.schemas import (
+    FilePatch,
+    HealRequest,
+    HealResponse,
+    LogEntry,
+    RepoAnalysisRequest,
+)
 
-__all__ = ["HealRequest", "HealResponse", "LogEntry"]
+__all__ = [
+    "FilePatch",
+    "HealRequest",
+    "HealResponse",
+    "LogEntry",
+    "RepoAnalysisRequest",
+]

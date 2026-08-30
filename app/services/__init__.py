@@ -1,20 +1,22 @@
 from app.services.llm_client import call_gemini, client
 from app.services.orchestrator import run_healing_pipeline
-from app.services.sandbox import (
-    SandboxService,
-    clean_sandbox,
-    run_pytest,
-    sandbox_service,
-    write_file,
+from app.services.repo_analyzer import RepoAnalyzer
+from app.services.sandboxes import (
+    BaseSandbox,
+    CSharpSandbox,
+    JavaSandbox,
+    PythonSandbox,
+    get_sandbox,
 )
 
 __all__ = [
-    "SandboxService",
+    "BaseSandbox",
+    "CSharpSandbox",
+    "JavaSandbox",
+    "PythonSandbox",
+    "RepoAnalyzer",
     "call_gemini",
-    "clean_sandbox",
     "client",
+    "get_sandbox",
     "run_healing_pipeline",
-    "run_pytest",
-    "sandbox_service",
-    "write_file",
 ]

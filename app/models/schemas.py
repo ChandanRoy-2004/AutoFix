@@ -5,8 +5,32 @@ from pydantic import BaseModel, Field
 class HealRequest(BaseModel):
     """Request schema for initiating the self-healing code pipeline."""
 
-    buggy_code: str = Field(..., description="The user-supplied Python script")
-    requirements: str = Field(..., description="Functional requirements the code must meet")
+    language: str = Field(
+        default="python",
+        description="Target programming language: python, csharp, java",
+    )
+    buggy_code: str = Field(..., description="Target source code")
+    requirements: str = Field(..., description="Functional requirements")
+    file_path: str = Field(
+        default="target.py",
+        description="Relative file path within repository",
+    )
+
+
+class RepoAnalysisRequest(BaseModel):
+    """Request schema for repository-level analysis and diagnosis."""
+
+    repo_url: str = Field(..., description="Repository URL to analyze")
+    branch: str = Field(default="main", description="Target branch name")
+    failing_test_output: str = Field(..., description="Failing test output logs")
+
+
+class FilePatch(BaseModel):
+    """Schema representing a file patch with original and updated contents."""
+
+    file_path: str = Field(..., description="Relative file path within repository")
+    original_content: str = Field(..., description="Original content before patch")
+    patched_content: str = Field(..., description="Patched content after repair")
 
 
 class LogEntry(BaseModel):
@@ -41,6 +65,14 @@ class HealResponse(BaseModel):
     generated_tests: str = Field(
         ...,
         description="The generated pytest test suite used for verification",
+    )
+    language: str = Field(
+        default="python",
+        description="Target programming language",
+    )
+    patches: list[FilePatch] = Field(
+        default_factory=list,
+        description="List of file patches applied during healing",
     )
     logs: list[LogEntry] = Field(
         default_factory=list,

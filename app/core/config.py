@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     WORKSPACE_DIR: Path = Path("./workspace")
     MAX_HEALING_ITERATIONS: int = 3
 
+    # GitHub App Integration
+    GITHUB_APP_ID: str = ""
+    GITHUB_PRIVATE_KEY_PATH: str = ""
+    GITHUB_WEBHOOK_SECRET: str = ""
+
+    # Multi-Language Support
+    SUPPORTED_LANGUAGES: list[str] = ["python", "csharp", "java"]
+
     model_config = SettingsConfigDict(
         env_file=(BASE_DIR / ".env", ".env"),
         env_file_encoding="utf-8",
