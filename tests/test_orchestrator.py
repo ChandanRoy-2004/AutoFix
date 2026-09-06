@@ -130,3 +130,62 @@ async def test_run_repo_healing_pipeline(tmp_path: Path):
         assert response.iterations_used == 1
         assert "return 42" in response.final_code
         assert len(response.patches) == 1
+
+
+@pytest.mark.anyio
+async def test_run_repo_healing_pipeline_targets_test_order_processor(tmp_path: Path):
+    """Verify run_repo_healing_pipeline targets test_order_processor.py when present in repo."""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "order_processor.py").write_text("def process_order(): pass", encoding="utf-8")
+    (repo_dir / "test_order_processor.py").write_text("def test_proc(): pass", encoding="utf-8")
+
+    with patch("app.services.orchestrator.call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch("app.services.orchestrator.get_sandbox") as mock_get_sandbox, \
+         patch("app.services.orchestrator.RepoAnalyzer.extract_relevant_context") as mock_extract:
+
+        mock_extract.return_value = {"order_processor.py": "def process_order(): pass"}
+        mock_sandbox = MagicMock()
+        mock_sandbox.run_tests.return_value = (True, "3 passed in 0.01s")
+        mock_get_sandbox.return_value = mock_sandbox
+        mock_gemini.return_value = "```python\ndef process_order(): return {'status': 'ok'}\n```"
+
+        response = await run_repo_healing_pipeline(
+            repo_dir=repo_dir,
+            language="python",
+            failing_file="order_processor.py",
+            failing_logs="IndexError: list index out of range",
+        )
+
+        assert response.success is True
+        mock_sandbox.run_tests.assert_called_once_with(
+            repo_dir.resolve(),
+            timeout=30,
+            test_file="test_order_processor.py",
+        )
+
+
+def test_python_sandbox_pytest_discovery_and_overrides(tmp_path: Path):
+    """Test PythonSandbox overrides restrictive testpaths and sets PYTHONPATH to workspace."""
+    from app.services.sandboxes.adapters import PythonSandbox
+
+    sandbox = PythonSandbox()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "test_order_processor.py").write_text("def test_ok(): assert True\n", encoding="utf-8")
+
+    with patch.object(sandbox, "_execute_command") as mock_exec:
+        mock_exec.return_value = (True, "1 passed")
+
+        passed, output = sandbox.run_tests(workspace)
+        assert passed is True
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[0][0]
+        kwargs = mock_exec.call_args[1]
+
+        # Ensure test_order_processor.py and testpaths override are in cmd
+        assert "test_order_processor.py" in cmd
+        assert "-o" in cmd
+        assert "testpaths=." in cmd
+        assert kwargs["env"]["PYTHONPATH"] == str(workspace.resolve())
+

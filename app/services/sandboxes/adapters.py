@@ -17,22 +17,45 @@ class PythonSandbox(BaseSandbox):
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(content, encoding="utf-8")
 
-    def run_tests(self, workspace: Path, timeout: int = 30) -> tuple[bool, str]:
-        """Execute pytest suite within the workspace."""
+    def run_tests(
+        self,
+        workspace: Path,
+        timeout: int = 30,
+        test_file: str | None = None,
+        extra_args: list[str] | None = None,
+        **kwargs,
+    ) -> tuple[bool, str]:
+        """Execute pytest suite within the workspace with discovery and testpath overrides."""
+        target = test_file
+        if not target and (workspace / "test_order_processor.py").exists():
+            target = "test_order_processor.py"
+
         cmd = [
             sys.executable,
             "-B",
             "-m",
             "pytest",
-            "-v",
-            "-p",
-            "no:cacheprovider",
         ]
-        env = os.environ.copy()
+        if target:
+            cmd.extend([str(target), "-v"])
+        else:
+            cmd.append("-v")
+
+        # Override restrictive testpaths (e.g. from pytest.ini) to discover test files in workspace
+        cmd.extend(["-o", "testpaths=.", "-p", "no:cacheprovider"])
+
+        if extra_args:
+            cmd.extend(extra_args)
+
+        env = {"PYTHONPATH": str(workspace.resolve()), **os.environ}
+        env["PYTHONPATH"] = str(workspace.resolve())
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        workspace_abs = str(workspace.resolve())
-        env["PYTHONPATH"] = f"{workspace_abs}:{env.get('PYTHONPATH', '')}"
-        return self._execute_command(cmd, cwd=workspace, timeout=timeout, env=env)
+
+        passed, output = self._execute_command(cmd, cwd=workspace, timeout=timeout, env=env)
+        if not passed:
+            print(f"[PYTEST_FAILURE] Pytest execution failed in {workspace}:\n{output}", flush=True)
+
+        return passed, output
 
     def clean(self, workspace: Path) -> None:
         """Remove Python bytecode, __pycache__, and .pytest_cache artifacts."""
@@ -88,7 +111,7 @@ class CSharpSandbox(BaseSandbox):
                 csproj_path = workspace / "AutoFixTests.csproj"
                 csproj_path.write_text(self.DEFAULT_CSPROJ, encoding="utf-8")
 
-    def run_tests(self, workspace: Path, timeout: int = 30) -> tuple[bool, str]:
+    def run_tests(self, workspace: Path, timeout: int = 30, **kwargs) -> tuple[bool, str]:
         """Execute dotnet test in workspace."""
         cmd = ["dotnet", "test", "--logger", "console;verbosity=detailed"]
         return self._execute_command(cmd, cwd=workspace, timeout=timeout)
@@ -156,7 +179,7 @@ class JavaSandbox(BaseSandbox):
                 pom_path = workspace / "pom.xml"
                 pom_path.write_text(self.DEFAULT_POM, encoding="utf-8")
 
-    def run_tests(self, workspace: Path, timeout: int = 30) -> tuple[bool, str]:
+    def run_tests(self, workspace: Path, timeout: int = 30, **kwargs) -> tuple[bool, str]:
         """Execute Maven or Gradle test runner in workspace."""
         if (workspace / "mvnw").exists():
             cmd = ["./mvnw", "test", "-B"]

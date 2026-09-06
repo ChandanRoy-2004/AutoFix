@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables or .env file."""
 
     GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.6-flash"
     PRIMARY_MODEL: str = "gemini-3.6-flash"
     FAST_MODEL: str = "gemini-3.6-flash"
     WORKSPACE_DIR: Path = Path("./workspace")

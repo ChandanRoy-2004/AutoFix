@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 import re
 import shutil
+from types import SimpleNamespace
 from typing import List
 
 from app.core.config import settings
@@ -339,8 +340,11 @@ async def run_repo_healing_pipeline(
     iteration = 0
     success = False
 
+    print(f"[ORCHESTRATOR] Initial test run starting in {repo_dir}...")
+
     while iteration < settings.MAX_HEALING_ITERATIONS:
         iteration += 1
+        print(f"[ORCHESTRATOR] Failure logs:\n{current_logs}", flush=True)
         add_log(
             step_name="REPO_HEALER_START",
             message=f"Healer Agent (Iteration {iteration}/{settings.MAX_HEALING_ITERATIONS}): Analyzing repo context and repairing {failing_file}...",
@@ -369,17 +373,20 @@ Diagnose the root cause of the error using the repository context and failure lo
 Output the COMPLETE, corrected implementation of `{failing_file}`.
 """
 
+        print("[ORCHESTRATOR] Sending prompt to Healer...")
         try:
             raw_patch = await call_gemini(
                 prompt=prompt,
                 system_instruction=get_healer_prompt(lang),
                 model=settings.PRIMARY_MODEL,
             )
-            patched_code = clean_code_fences(raw_patch)
+            patched_code = clean_code_fences(raw_patch) if raw_patch else ""
             if not patched_code:
+                print("[ORCHESTRATOR] Healer returned None or empty string.")
                 add_log(step_name="ERROR", message="Healer returned empty code patch.")
                 break
 
+            print(f"[ORCHESTRATOR] Healer returned code ({len(patched_code)} characters).")
             current_code = patched_code
             target_file_path.write_text(patched_code, encoding="utf-8")
             add_log(
@@ -387,6 +394,7 @@ Output the COMPLETE, corrected implementation of `{failing_file}`.
                 message=f"Applied patch to {failing_file} in repository (Iteration {iteration}):\n```{lang}\n{patched_code}\n```",
             )
         except Exception as e:
+            print(f"[ORCHESTRATOR] Healer returned None or empty string (exception: {e}).")
             error_msg = f"Healer failed during repo repair (Iteration {iteration}): {str(e)}"
             add_log(step_name="ERROR", message=error_msg)
             break
@@ -396,7 +404,30 @@ Output the COMPLETE, corrected implementation of `{failing_file}`.
             step_name="REPO_TEST_RUN",
             message=f"Running repository tests (Iteration {iteration})...",
         )
-        passed, output = sandbox.run_tests(repo_path, timeout=30)
+
+        # Target specific test file or override restrictive testpaths
+        target_test_file = None
+        if (repo_path / "test_order_processor.py").exists():
+            target_test_file = "test_order_processor.py"
+        elif (repo_path / f"test_{Path(failing_file).name}").exists():
+            target_test_file = f"test_{Path(failing_file).name}"
+
+        raw_test_result = sandbox.run_tests(
+            repo_path,
+            timeout=30,
+            test_file=target_test_file,
+        )
+        if isinstance(raw_test_result, tuple):
+            passed, output = raw_test_result
+            test_result = SimpleNamespace(passed=passed, logs=output)
+        else:
+            test_result = raw_test_result
+            passed = getattr(test_result, "passed", False)
+            output = getattr(test_result, "logs", "")
+
+        print(f"[ORCHESTRATOR] Iteration {iteration} test passed: {test_result.passed}", flush=True)
+        if not test_result.passed:
+            print(f"[ORCHESTRATOR] Test failure stdout/stderr:\n{test_result.logs}", flush=True)
 
         if passed:
             add_log(

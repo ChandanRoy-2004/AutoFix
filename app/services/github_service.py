@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 class GitHubService:
     """Service for interacting with GitHub App API, cloning repositories, committing patches, and commenting on PRs."""
 
+    def __init__(self):
+        self.last_clone_returncode: int | None = None
+        self.last_clone_stderr: str = ""
+
     def generate_jwt(self) -> str:
         """Generate and sign a RS256 JWT valid for 10 minutes for GitHub App authentication."""
         if not settings.GITHUB_APP_ID or not settings.GITHUB_PRIVATE_KEY_PATH:
@@ -103,13 +107,17 @@ class GitHubService:
                 text=True,
                 check=False,
             )
+            self.last_clone_returncode = result.returncode
+            self.last_clone_stderr = result.stderr
             if result.returncode == 0:
                 logger.info("Successfully cloned %s (branch: %s) to %s", repo_url, branch, target_path)
                 return True
             else:
-                logger.error("Failed to clone repository %s: %s", repo_url, result.stderr)
+                logger.error("Failed to clone repository %s (exit code %s): %s", repo_url, result.returncode, result.stderr)
                 return False
         except Exception as e:
+            self.last_clone_returncode = -1
+            self.last_clone_stderr = str(e)
             logger.error("Exception occurred while cloning repository: %s", e)
             return False
 
@@ -201,3 +209,45 @@ class GitHubService:
         except Exception as e:
             logger.error("Error posting PR comment: %s", e)
             return False
+
+    @staticmethod
+    def format_pr_comment(heal_response) -> str:
+        """Format a GitHub Pull Request comment detailing the healing results in a Markdown table."""
+        status_icon = "✅ Passed" if heal_response.success else "❌ Failed"
+        patched_files_str = (
+            ", ".join([p.file_path for p in heal_response.patches])
+            if heal_response.patches
+            else "None"
+        )
+
+        passed_test_logs = ""
+        for log in reversed(heal_response.logs):
+            if log.step_name in ["TESTS_PASSED", "REPO_TEST_RUN", "REPO_PIPELINE_COMPLETE"]:
+                passed_test_logs = log.message
+                break
+        if not passed_test_logs and heal_response.logs:
+            passed_test_logs = heal_response.logs[-1].message
+
+        diff_section = ""
+        if heal_response.patches:
+            diff_section = "\n### 📝 Code Diffs & Patches\n"
+            for patch in heal_response.patches:
+                diff_section += f"**`{patch.file_path}`**\n```\n{patch.patched_content}\n```\n"
+
+        comment = f"""## 🤖 AutoFix Autonomous Healer Report
+
+| Metric | Value |
+| :--- | :--- |
+| **Status** | {status_icon} |
+| **Iterations Used** | {heal_response.iterations_used} |
+| **Language** | {heal_response.language.capitalize() if getattr(heal_response, 'language', None) else "Python"} |
+| **Patched Files** | {patched_files_str} |
+
+{diff_section}
+### 🧪 Test Logs
+```text
+{passed_test_logs}
+```
+"""
+        return comment.strip()
+

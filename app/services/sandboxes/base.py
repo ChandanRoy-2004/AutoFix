@@ -14,7 +14,7 @@ class BaseSandbox(ABC):
         pass
 
     @abstractmethod
-    def run_tests(self, workspace: Path, timeout: int = 30) -> tuple[bool, str]:
+    def run_tests(self, workspace: Path, timeout: int = 30, **kwargs) -> tuple[bool, str]:
         """Run tests within the workspace and return (passed, output)."""
         pass
 
