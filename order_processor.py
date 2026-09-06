@@ -1,3 +1,4 @@
+import re
 from models import Order
 from tax_service import get_tax_rate_by_tier
 
@@ -8,11 +9,13 @@ def process_order(order: Order) -> dict:
     discount = 0.0
     if order.coupon_code:
         if order.coupon_code.startswith("SAVE"):
-            try:
-                coupon_val = float(order.coupon_code[4:])
-                discount = min(coupon_val, subtotal)
-            except ValueError:
-                discount = 0.0
+            matches = re.findall(r'\d+(?:\.\d+)?', order.coupon_code)
+            if matches:
+                try:
+                    coupon_val = float(matches[0])
+                    discount = min(coupon_val, subtotal)
+                except ValueError:
+                    discount = 0.0
     
     discounted_subtotal = max(0.0, subtotal - discount)
     
