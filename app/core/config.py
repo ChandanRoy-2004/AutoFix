@@ -18,7 +18,8 @@ class Settings(BaseSettings):
 
     # GitHub App Integration
     GITHUB_APP_ID: str = ""
-    GITHUB_PRIVATE_KEY_PATH: str = ""
+    GITHUB_PRIVATE_KEY_PATH: str | None = None
+    GITHUB_PRIVATE_KEY_CONTENT: str | None = None
     GITHUB_WEBHOOK_SECRET: str = ""
 
     # Multi-Language Support

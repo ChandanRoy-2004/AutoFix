@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.venv
+venv
+workspace/
+.git
+.env
+*.pem
+assets/
+tests/
