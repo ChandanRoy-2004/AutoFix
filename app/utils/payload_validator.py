@@ -1,24 +1,33 @@
 """Webhook payload validation and metadata extractor."""
-from typing import Dict, Any
 
-def extract_repo_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extracts repository metadata from incoming GitHub webhook payloads.
-    """
-    # BUG 1: Assumes payload["repository"] always contains "owner" dict
-    # If missing or flat, raises KeyError
-    repo_info = payload["repository"]
-    owner_login = repo_info["owner"]["login"]
-    repo_name = repo_info["name"]
+from typing import Any
 
-    # BUG 2: Empty or negative stars count causes ValueError
+
+def extract_repo_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extracts repository metadata from incoming GitHub webhook payloads."""
+    repo_info = payload.get("repository", {})
+    if not isinstance(repo_info, dict):
+        repo_info = {}
+
+    owner_info = repo_info.get("owner")
+    if isinstance(owner_info, dict):
+        owner_login = owner_info.get("login", "")
+    elif isinstance(owner_info, str):
+        owner_login = owner_info
+    else:
+        owner_login = ""
+
+    repo_name = repo_info.get("name", "")
+
     stars = repo_info.get("stargazers_count", 0)
-    if stars < 0:
-        raise ValueError("Star count cannot be negative")
+    if not isinstance(stars, int) or stars < 0:
+        stars = 0
 
-    # BUG 3: Off-by-one / unhandled None on topic tags
-    topics = repo_info.get("topics", [])
-    primary_topic = topics[0] if len(topics) > 0 else "general"
+    topics = repo_info.get("topics")
+    if isinstance(topics, list) and len(topics) > 0 and topics[0]:
+        primary_topic = topics[0]
+    else:
+        primary_topic = "general"
 
     return {
         "full_name": f"{owner_login}/{repo_name}",
@@ -29,14 +38,18 @@ def extract_repo_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def is_pull_request_valid(payload: Dict[str, Any]) -> bool:
+def is_pull_request_valid(payload: dict[str, Any]) -> bool:
     """Verifies PR payload contains required non-empty base attributes."""
     pr = payload.get("pull_request")
-    if not pr:
+    if not isinstance(pr, dict):
         return False
-    
-    # BUG 4: Unhandled missing head/base refs crashing with KeyError
-    head_sha = pr["head"]["sha"]
-    base_ref = pr["base"]["ref"]
-    
+
+    head = pr.get("head")
+    base = pr.get("base")
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        return False
+
+    head_sha = head.get("sha")
+    base_ref = base.get("ref")
+
     return bool(head_sha and base_ref)
