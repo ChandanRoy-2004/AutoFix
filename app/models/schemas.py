@@ -7,7 +7,7 @@ class HealRequest(BaseModel):
 
     language: str = Field(
         default="python",
-        description="Target programming language: python, csharp, java",
+        description="Target programming language (default: python)",
     )
     buggy_code: str = Field(..., description="Target source code")
     requirements: str = Field(..., description="Functional requirements")

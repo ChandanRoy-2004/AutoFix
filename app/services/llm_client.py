@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 from typing import Optional
 
@@ -10,8 +11,26 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize Google GenAI client
-client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+_client = None
+
+
+def get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        api_key = (
+            getattr(settings, "GOOGLE_API_KEY", None)
+            or getattr(settings, "GEMINI_API_KEY", None)
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GEMINI_API_KEY")
+        )
+        if not api_key:
+            raise ValueError("Google API key is not configured in settings or environment.")
+        _client = genai.Client(api_key=api_key)
+    return _client
+
+
+# Alias for backward compatibility
+get_genai_client = get_client
 
 PRIMARY_MODEL = getattr(settings, "GEMINI_MODEL", "gemini-3.6-flash")
 # Valid models for Google GenAI SDK (verified working on API)
@@ -128,6 +147,8 @@ async def call_gemini(
     primary = model or getattr(settings, "GEMINI_MODEL", None) or PRIMARY_MODEL
     candidate_models = [primary] + [m for m in FALLBACK_MODELS if m != primary]
 
+    get_client()
+
     config = types.GenerateContentConfig(
         system_instruction=system_instruction if system_instruction else None,
         temperature=0.1,
@@ -140,7 +161,7 @@ async def call_gemini(
             print(f"[LLM_CLIENT] Attempting model: {model_name}")
             try:
                 response = await asyncio.to_thread(
-                    client.models.generate_content,
+                    get_client().models.generate_content,
                     model=model_name,
                     contents=prompt,
                     config=config,

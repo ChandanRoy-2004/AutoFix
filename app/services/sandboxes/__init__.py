@@ -1,15 +1,14 @@
 from app.services.sandboxes.adapters import (
-    CSharpSandbox,
-    JavaSandbox,
+    PythonAdapter,
     PythonSandbox,
     get_sandbox,
 )
-from app.services.sandboxes.base import BaseSandbox
+from app.services.sandboxes.base import (
+    BaseSandbox,
+    BaseSandboxAdapter,
+)
 
 __all__ = [
-    "BaseSandbox",
-    "CSharpSandbox",
-    "JavaSandbox",
-    "PythonSandbox",
-    "get_sandbox",
+    "BaseSandboxAdapter",
+    "PythonAdapter",
 ]

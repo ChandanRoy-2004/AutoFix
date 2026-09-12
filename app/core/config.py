@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str = ""
 
     # Multi-Language Support
-    SUPPORTED_LANGUAGES: list[str] = ["python", "csharp", "java"]
+    SUPPORTED_LANGUAGES: list[str] = ["python"]
 
     model_config = SettingsConfigDict(
         env_file=(BASE_DIR / ".env", ".env"),

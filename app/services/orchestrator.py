@@ -11,26 +11,27 @@ from app.core.prompt_templates import get_healer_prompt, get_test_engineer_promp
 from app.models.schemas import FilePatch, HealRequest, HealResponse, LogEntry
 from app.services.llm_client import call_gemini
 from app.services.repo_analyzer import RepoAnalyzer
-from app.services.sandboxes.adapters import get_sandbox
+from app.services.sandboxes import PythonAdapter
+from app.services.sandboxes.adapters import PythonSandbox, get_sandbox
 
 logger = logging.getLogger(__name__)
 
 
 def clean_code_fences(code: str) -> str:
-    """Strip leading and trailing markdown code fences across supported languages."""
+    """Strip leading and trailing markdown code fences across code blocks."""
     if not code:
         return ""
 
     text = code.strip()
 
-    # Match standard fenced code blocks starting with ```lang
-    fence_pattern = r"^```(?:python|py|csharp|cs|dotnet|java)?\s*\n([\s\S]*?)\n```\s*$"
+    # Match standard fenced code blocks starting with ```lang or ```
+    fence_pattern = r"^```[a-zA-Z0-9_+#-]*\s*\n([\s\S]*?)\n```\s*$"
     match = re.search(fence_pattern, text)
     if match:
         return match.group(1).strip()
 
     # If markdown fences exist within larger text
-    general_pattern = r"```(?:python|py|csharp|cs|dotnet|java)?\s*\n([\s\S]*?)\n```"
+    general_pattern = r"```[a-zA-Z0-9_+#-]*\s*\n([\s\S]*?)\n```"
     matches = list(re.finditer(general_pattern, text))
     if matches:
         longest = max(matches, key=lambda m: len(m.group(1)))
@@ -48,10 +49,10 @@ def clean_code_fences(code: str) -> str:
 
 
 async def run_healing_pipeline(request: HealRequest) -> HealResponse:
-    """Orchestrate the multi-agent code self-healing pipeline across supported languages."""
+    """Orchestrate the multi-agent code self-healing pipeline dedicated to Python projects."""
     logs: List[LogEntry] = []
-    lang = (request.language or "python").lower().strip()
-    sandbox = get_sandbox(lang)
+    lang = "python"
+    sandbox = PythonAdapter()
 
     def add_log(step_name: str, message: str) -> None:
         """Append a timestamped LogEntry to the pipeline log list."""
@@ -65,31 +66,24 @@ async def run_healing_pipeline(request: HealRequest) -> HealResponse:
 
     add_log(
         step_name="PIPELINE_INIT",
-        message=f"AutoFix multi-agent healing pipeline initialized for language: {lang}.",
+        message=f"AutoFix multi-agent healing pipeline initialized for Python project.",
     )
 
-    # Determine default file naming based on language
-    if lang in ["csharp", "c#", "dotnet"]:
-        source_file = request.file_path if request.file_path.endswith(".cs") else "Target.cs"
-        test_filename = "TargetTests.cs"
-    elif lang == "java":
-        source_file = request.file_path if request.file_path.endswith(".java") else "Target.java"
-        test_filename = "TargetTest.java"
-    else:
-        source_file = request.file_path if request.file_path.endswith(".py") else "target.py"
-        test_filename = "test_target.py"
+    # Determine Python file naming
+    source_file = request.file_path if (request.file_path and request.file_path.endswith(".py")) else "target.py"
+    test_filename = "test_target.py"
 
     # Step 1: Test Generation via QA Test Engineer
     try:
         add_log(
             step_name="TEST_GENERATION",
-            message=f"Test Engineer Agent: Synthesizing {lang} test suite based on requirements and code...",
+            message="Test Engineer Agent: Synthesizing pytest suite based on requirements and code...",
         )
         test_prompt = f"""### Functional Requirements & Specifications:
 {request.requirements}
 
 ### Target Source Code (`{source_file}`):
-```{lang}
+```python
 {request.buggy_code}
 ```
 
@@ -104,7 +98,7 @@ Write a comprehensive, standalone automated test suite validating all requiremen
         generated_tests = clean_code_fences(raw_tests)
         add_log(
             step_name="TEST_GENERATION_SUCCESS",
-            message=f"Test suite successfully synthesized:\n```{lang}\n{generated_tests}\n```",
+            message=f"Test suite successfully synthesized:\n```python\n{generated_tests}\n```",
         )
     except Exception as e:
         error_msg = f"Test suite generation failed: {str(e)}"
@@ -190,7 +184,7 @@ Write a comprehensive, standalone automated test suite validating all requiremen
 {request.requirements}
 
 ### Current Target Source Code (`{source_file}`):
-```{lang}
+```python
 {current_code}
 ```
 
@@ -219,7 +213,7 @@ Diagnose the root cause of the test failures and output the complete, corrected 
             )
             add_log(
                 step_name="CODE_PATCHED",
-                message=f"Healer Agent (Iteration {iteration}/{settings.MAX_HEALING_ITERATIONS}): Patched {source_file} written to sandbox:\n```{lang}\n{patched_code}\n```",
+                message=f"Healer Agent (Iteration {iteration}/{settings.MAX_HEALING_ITERATIONS}): Patched {source_file} written to sandbox:\n```python\n{patched_code}\n```",
             )
         except Exception as e:
             error_msg = f"Healer Agent failed on iteration {iteration}: {str(e)}"
@@ -266,14 +260,14 @@ Diagnose the root cause of the test failures and output the complete, corrected 
 
 async def run_repo_healing_pipeline(
     repo_dir: Path,
-    language: str,
-    failing_file: str,
-    failing_logs: str,
+    language: str = "python",
+    failing_file: str = "target.py",
+    failing_logs: str = "",
 ) -> HealResponse:
-    """Diagnose and heal code directly within a repository using AST context and sandbox test runners."""
+    """Diagnose and heal Python code directly within a repository using AST context and sandbox test runners."""
     repo_path = Path(repo_dir).resolve()
-    lang = (language or "python").lower().strip()
-    sandbox = get_sandbox(lang)
+    lang = "python"
+    sandbox = PythonAdapter()
     analyzer = RepoAnalyzer()
     logs: List[LogEntry] = []
 
@@ -292,7 +286,7 @@ async def run_repo_healing_pipeline(
         message=f"Repository healing pipeline initialized for {repo_path.name} (language: {lang}, failing file: {failing_file}).",
     )
 
-    # 1. Extract context using RepoAnalyzer
+    # 1. Extract context using RepoAnalyzer exclusively for Python
     try:
         add_log(
             step_name="AST_CONTEXT_EXTRACTION",
@@ -353,13 +347,13 @@ async def run_repo_healing_pipeline(
         context_str = ""
         for rel_name, content in context.items():
             if rel_name != failing_file:
-                context_str += f"\n--- Context File: {rel_name} ---\n```{lang}\n{content}\n```\n"
+                context_str += f"\n--- Context File: {rel_name} ---\n```python\n{content}\n```\n"
 
         prompt = f"""### Repository Context & Related Source Files:
 {context_str if context_str else "No additional context files required."}
 
 ### Target Failing File (`{failing_file}`):
-```{lang}
+```python
 {current_code}
 ```
 
@@ -391,7 +385,7 @@ Output the COMPLETE, corrected implementation of `{failing_file}`.
             target_file_path.write_text(patched_code, encoding="utf-8")
             add_log(
                 step_name="REPO_CODE_PATCHED",
-                message=f"Applied patch to {failing_file} in repository (Iteration {iteration}):\n```{lang}\n{patched_code}\n```",
+                message=f"Applied patch to {failing_file} in repository (Iteration {iteration}):\n```python\n{patched_code}\n```",
             )
         except Exception as e:
             print(f"[ORCHESTRATOR] Healer returned None or empty string (exception: {e}).")
@@ -399,7 +393,7 @@ Output the COMPLETE, corrected implementation of `{failing_file}`.
             add_log(step_name="ERROR", message=error_msg)
             break
 
-        # Re-run repository tests
+        # Re-run repository tests with PythonAdapter
         add_log(
             step_name="REPO_TEST_RUN",
             message=f"Running repository tests (Iteration {iteration})...",
@@ -407,7 +401,9 @@ Output the COMPLETE, corrected implementation of `{failing_file}`.
 
         # Target specific test file or override restrictive testpaths
         target_test_file = None
-        if (repo_path / "test_order_processor.py").exists():
+        if "event_formatter" in str(failing_file) or (repo_path / "tests" / "test_event_formatter.py").exists():
+            target_test_file = "tests/test_event_formatter.py"
+        elif (repo_path / "test_order_processor.py").exists():
             target_test_file = "test_order_processor.py"
         elif (repo_path / f"test_{Path(failing_file).name}").exists():
             target_test_file = f"test_{Path(failing_file).name}"

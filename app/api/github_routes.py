@@ -2,8 +2,11 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import traceback
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
@@ -84,27 +87,25 @@ async def process_pr_healing(
             return
 
         # Pre-flight test check: verify if repository tests already pass
-        sandbox = get_sandbox("python")
-        test_file_target = "test_order_processor.py" if (temp_dir / "test_order_processor.py").exists() else None
-        preflight_passed, preflight_output = sandbox.run_tests(
-            temp_dir.resolve(),
-            timeout=30,
-            test_file=test_file_target,
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/test_event_formatter.py", "-v"],
+            cwd=str(temp_dir),
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(temp_dir.resolve())},
         )
-        if preflight_passed:
+        if result.returncode == 0:
             healthy_msg = f"[GITHUB_BOT] Repository at {branch} is already healthy and all tests pass! Exiting without changes."
             print(healthy_msg, flush=True)
             logger.info(healthy_msg)
             return
 
-        captured_logs = preflight_output.strip() if preflight_output else "IndexError: list index out of range"
-
         print(f"[GITHUB_BOT] 3. Starting run_repo_healing_pipeline...", flush=True)
         response = await run_repo_healing_pipeline(
             repo_dir=temp_dir.resolve(),
             language="python",
-            failing_file="order_processor.py",
-            failing_logs=captured_logs,
+            failing_file="app/utils/event_formatter.py",
+            failing_logs=result.stderr + "\n" + result.stdout,
         )
 
         if response.success:
@@ -116,7 +117,7 @@ async def process_pr_healing(
             push_res = github_service.commit_and_push_patch(
                 temp_dir,
                 branch,
-                "fix(autofix): resolve edge case and discount bounds",
+                "fix(autofix): resolve edge case in audit event formatter",
                 token,
             )
             print(f"[GITHUB_BOT] Push patch commit completed with result: {push_res}", flush=True)

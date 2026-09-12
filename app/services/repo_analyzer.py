@@ -1,23 +1,17 @@
 import ast
 from collections import deque
 import logging
-import os
 from pathlib import Path
-import re
 
 logger = logging.getLogger(__name__)
 
 
 class RepoAnalyzer:
-    """Static analyzer for extracting AST/regex dependency graphs and localized context from repositories."""
+    """Python AST dependency analyzer for extracting import graphs and localized context from repositories."""
 
     LANGUAGE_EXTENSIONS = {
         "python": [".py"],
         "py": [".py"],
-        "csharp": [".cs"],
-        "c#": [".cs"],
-        "dotnet": [".cs"],
-        "java": [".java"],
     }
 
     def scan_python_dependencies(self, file_path: Path) -> set[str]:
@@ -50,77 +44,26 @@ class RepoAnalyzer:
 
         return dependencies
 
-    def scan_csharp_dependencies(self, file_path: Path) -> set[str]:
-        """Extract namespaces and types from C# source code using regex heuristics."""
-        if not file_path.exists() or not file_path.is_file():
-            return set()
-
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError) as e:
-            logger.debug("Failed to read C# file %s: %s", file_path, e)
-            return set()
-
-        dependencies: set[str] = set()
-
-        # Match using directives: using System.Text; using MyApp.Models; using static System.Math;
-        using_pattern = r"^\s*using\s+(?:static\s+)?(?:[\w\.]+\s*=\s*)?([A-Za-z0-9_\.]+)\s*;"
-        for match in re.finditer(using_pattern, content, re.MULTILINE):
-            dep = match.group(1).strip()
-            if dep:
-                dependencies.add(dep)
-                if "." in dep:
-                    dependencies.add(dep.split(".")[-1])
-
-        # Match class instantiation patterns: new OrderService( or new User {
-        instantiation_pattern = r"\bnew\s+([A-Za-z0-9_]+)\s*[\(\{]"
-        for match in re.finditer(instantiation_pattern, content):
-            dep = match.group(1).strip()
-            if dep:
-                dependencies.add(dep)
-
-        return dependencies
-
-    def scan_java_dependencies(self, file_path: Path) -> set[str]:
-        """Extract packages and imported classes from Java source code using regex heuristics."""
-        if not file_path.exists() or not file_path.is_file():
-            return set()
-
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError) as e:
-            logger.debug("Failed to read Java file %s: %s", file_path, e)
-            return set()
-
-        dependencies: set[str] = set()
-
-        # Match import statements: import com.example.models.User; import com.example.utils.*;
-        import_pattern = r"^\s*import\s+(?:static\s+)?([A-Za-z0-9_\.]+)(?:\.\*)?\s*;"
-        for match in re.finditer(import_pattern, content, re.MULTILINE):
-            dep = match.group(1).strip()
-            if dep:
-                dependencies.add(dep)
-                if "." in dep:
-                    dependencies.add(dep.split(".")[-1])
-
-        return dependencies
-
     def build_dependency_graph(self, repo_dir: Path, language: str = "python") -> dict[str, list[str]]:
-        """Recursively scan repo_dir for matching source files and map relative paths to internal dependencies."""
+        """Recursively scan repo_dir strictly for Python (.py) source files and map imports using native AST."""
         repo_path = Path(repo_dir).resolve()
         if not repo_path.exists() or not repo_path.is_dir():
             return {}
 
-        lang_key = (language or "python").lower().strip()
-        extensions = self.LANGUAGE_EXTENSIONS.get(lang_key, [".py"])
+        # Collect exclusively Python source files
+        all_files: list[Path] = list(repo_path.rglob("*.py"))
 
-        # Collect all source files
-        all_files: list[Path] = []
-        for ext in extensions:
-            all_files.extend(repo_path.rglob(f"*{ext}"))
-
-        # Filter out hidden or build/cache dirs
-        ignored_dirs = {".git", ".pytest_cache", "__pycache__", "venv", ".venv", "bin", "obj", "target", ".gradle", "node_modules"}
+        # Filter out hidden or virtual environment/cache directories
+        ignored_dirs = {
+            ".git",
+            ".pytest_cache",
+            "__pycache__",
+            "venv",
+            ".venv",
+            "build",
+            "dist",
+            "node_modules",
+        }
         valid_files: list[Path] = [
             f for f in all_files
             if f.is_file() and not any(part in ignored_dirs for part in f.relative_to(repo_path).parts)
@@ -141,22 +84,14 @@ class RepoAnalyzer:
 
             # Module dot notation, e.g. app/models/schemas.py -> app.models.schemas
             module_dot = rel.replace("/", ".").replace("\\", ".")
-            for ext in extensions:
-                if module_dot.endswith(ext):
-                    module_dot = module_dot[:-len(ext)]
-                    break
+            if module_dot.endswith(".py"):
+                module_dot = module_dot[:-3]
             module_notation_map[module_dot] = rel
 
         graph: dict[str, list[str]] = {}
 
         for rel, path_obj in file_map.items():
-            if lang_key in ["csharp", "c#", "dotnet"]:
-                raw_deps = self.scan_csharp_dependencies(path_obj)
-            elif lang_key == "java":
-                raw_deps = self.scan_java_dependencies(path_obj)
-            else:
-                raw_deps = self.scan_python_dependencies(path_obj)
-
+            raw_deps = self.scan_python_dependencies(path_obj)
             matched_rel_files: set[str] = set()
 
             for dep in raw_deps:
@@ -177,12 +112,11 @@ class RepoAnalyzer:
                         if matched != rel:
                             matched_rel_files.add(matched)
 
-                # 3. Path conversion (e.g. app/models/schemas)
+                # 3. Path conversion (e.g. app/models/schemas.py)
                 as_path_str = dep.replace(".", "/")
-                for ext in extensions:
-                    candidate = f"{as_path_str}{ext}"
-                    if candidate in file_map and candidate != rel:
-                        matched_rel_files.add(candidate)
+                candidate = f"{as_path_str}.py"
+                if candidate in file_map and candidate != rel:
+                    matched_rel_files.add(candidate)
 
             graph[rel] = sorted(matched_rel_files)
 
@@ -195,12 +129,12 @@ class RepoAnalyzer:
         language: str = "python",
         depth: int = 1,
     ) -> dict[str, str]:
-        """Extract contents of the failing file and its connected upstream/downstream dependencies up to depth."""
+        """Extract contents of the failing Python file and its connected AST dependencies up to depth."""
         repo_path = Path(repo_dir).resolve()
         if not repo_path.exists():
             return {}
 
-        graph = self.build_dependency_graph(repo_path, language=language)
+        graph = self.build_dependency_graph(repo_path, language="python")
 
         # Normalize failing_file relative path
         failing_path = Path(failing_file)

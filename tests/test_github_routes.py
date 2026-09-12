@@ -148,7 +148,7 @@ async def test_process_pr_healing_success(tmp_path: Path):
     )
 
     with patch("app.api.github_routes.GitHubService") as mock_gh_cls, \
-         patch("app.api.github_routes.get_sandbox") as mock_get_sandbox, \
+         patch("app.api.github_routes.subprocess.run") as mock_subproc_run, \
          patch("app.api.github_routes.run_repo_healing_pipeline", new_callable=AsyncMock) as mock_run_healing:
 
         mock_gh = MagicMock()
@@ -159,9 +159,11 @@ async def test_process_pr_healing_success(tmp_path: Path):
         mock_gh.post_pr_comment = AsyncMock(return_value=True)
         mock_gh_cls.return_value = mock_gh
 
-        mock_sandbox = MagicMock()
-        mock_sandbox.run_tests.return_value = (False, "IndexError: list index out of range")
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_subproc = MagicMock()
+        mock_subproc.returncode = 1
+        mock_subproc.stdout = "FAILED tests/test_event_formatter.py - AssertionError"
+        mock_subproc.stderr = "traceback error"
+        mock_subproc_run.return_value = mock_subproc
 
         mock_run_healing.return_value = mock_response
 
@@ -182,13 +184,13 @@ async def test_process_pr_healing_success(tmp_path: Path):
         mock_run_healing.assert_awaited_once_with(
             repo_dir=Path("workspace/pr_88").resolve(),
             language="python",
-            failing_file="order_processor.py",
-            failing_logs="IndexError: list index out of range",
+            failing_file="app/utils/event_formatter.py",
+            failing_logs="traceback error\nFAILED tests/test_event_formatter.py - AssertionError",
         )
         mock_gh.commit_and_push_patch.assert_called_once_with(
             Path("workspace/pr_88"),
             "feature/order-processor",
-            "fix(autofix): resolve edge case and discount bounds",
+            "fix(autofix): resolve edge case in audit event formatter",
             "test_token_123",
         )
         mock_gh.post_pr_comment.assert_awaited_once_with(
@@ -204,7 +206,7 @@ async def test_process_pr_healing_success(tmp_path: Path):
 async def test_process_pr_healing_already_healthy():
     """Test process_pr_healing exits early when pre-flight test run passes."""
     with patch("app.api.github_routes.GitHubService") as mock_gh_cls, \
-         patch("app.api.github_routes.get_sandbox") as mock_get_sandbox, \
+         patch("app.api.github_routes.subprocess.run") as mock_subproc_run, \
          patch("app.api.github_routes.run_repo_healing_pipeline", new_callable=AsyncMock) as mock_run_healing:
 
         mock_gh = MagicMock()
@@ -212,9 +214,11 @@ async def test_process_pr_healing_already_healthy():
         mock_gh.clone_repo = MagicMock(return_value=True)
         mock_gh_cls.return_value = mock_gh
 
-        mock_sandbox = MagicMock()
-        mock_sandbox.run_tests.return_value = (True, "All tests passed!")
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_subproc = MagicMock()
+        mock_subproc.returncode = 0
+        mock_subproc.stdout = "All tests passed!"
+        mock_subproc.stderr = ""
+        mock_subproc_run.return_value = mock_subproc
 
         await process_pr_healing(
             repo_full_name="org/test-repo",

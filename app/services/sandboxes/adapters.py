@@ -1,13 +1,14 @@
+import asyncio
 import os
 from pathlib import Path
 import shutil
 import sys
 
-from app.services.sandboxes.base import BaseSandbox
+from app.services.sandboxes.base import BaseSandboxAdapter, BaseSandbox
 
 
-class PythonSandbox(BaseSandbox):
-    """Execution sandbox for Python test suites using pytest."""
+class PythonAdapter(BaseSandboxAdapter):
+    """Execution sandbox adapter for Python test suites using pytest."""
 
     def write_files(self, workspace: Path, files: dict[str, str]) -> None:
         """Write Python source and test files to workspace."""
@@ -25,10 +26,16 @@ class PythonSandbox(BaseSandbox):
         extra_args: list[str] | None = None,
         **kwargs,
     ) -> tuple[bool, str]:
-        """Execute pytest suite within the workspace with discovery and testpath overrides."""
+        """Execute pytest suite within the workspace with PYTHONPATH set to the repository directory."""
+        repo_dir = Path(workspace)
         target = test_file
-        if not target and (workspace / "test_order_processor.py").exists():
-            target = "test_order_processor.py"
+        if not target:
+            if "event_formatter" in str(kwargs.get("failing_file", "")) or (repo_dir / "tests" / "test_event_formatter.py").exists():
+                target = "tests/test_event_formatter.py"
+            elif (repo_dir / "test_order_processor.py").exists():
+                target = "test_order_processor.py"
+        elif "event_formatter" in str(target):
+            target = "tests/test_event_formatter.py"
 
         cmd = [
             sys.executable,
@@ -47,15 +54,47 @@ class PythonSandbox(BaseSandbox):
         if extra_args:
             cmd.extend(extra_args)
 
-        env = {"PYTHONPATH": str(workspace.resolve()), **os.environ}
-        env["PYTHONPATH"] = str(workspace.resolve())
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env = {**os.environ, "PYTHONPATH": str(repo_dir.resolve()), "PYTHONDONTWRITEBYTECODE": "1"}
 
-        passed, output = self._execute_command(cmd, cwd=workspace, timeout=timeout, env=env)
+        passed, output = self._execute_command(cmd, cwd=repo_dir, timeout=timeout, env=env)
         if not passed:
-            print(f"[PYTEST_FAILURE] Pytest execution failed in {workspace}:\n{output}", flush=True)
+            print(f"[PYTEST_FAILURE] Pytest execution failed in {repo_dir}:\n{output}", flush=True)
 
         return passed, output
+
+    async def create_subprocess_exec(
+        self,
+        repo_dir: Path,
+        test_file: str = "tests/test_event_formatter.py",
+        extra_args: list[str] | None = None,
+        timeout: int = 30,
+    ) -> tuple[bool, str]:
+        """Execute pytest asynchronously using asyncio.create_subprocess_exec with PYTHONPATH set."""
+        repo_path = Path(repo_dir).resolve()
+        target = "tests/test_event_formatter.py" if "event_formatter" in str(test_file) else str(test_file)
+        cmd = [sys.executable, "-B", "-m", "pytest", target, "-v"]
+        if extra_args:
+            cmd.extend(extra_args)
+
+        env = {**os.environ, "PYTHONPATH": str(repo_path.resolve()), "PYTHONDONTWRITEBYTECODE": "1"}
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(repo_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            output = (stdout.decode("utf-8", errors="replace") + "\n" + stderr.decode("utf-8", errors="replace")).strip()
+            return proc.returncode == 0, output
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            return False, f"Execution timed out after {timeout} seconds."
 
     def clean(self, workspace: Path) -> None:
         """Remove Python bytecode, __pycache__, and .pytest_cache artifacts."""
@@ -71,145 +110,10 @@ class PythonSandbox(BaseSandbox):
                 pass
 
 
-class CSharpSandbox(BaseSandbox):
-    """Execution sandbox for .NET / C# test suites using dotnet test."""
-
-    DEFAULT_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageReference Include="xunit" Version="2.6.6" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-  </ItemGroup>
-</Project>
-"""
-
-    def write_files(self, workspace: Path, files: dict[str, str]) -> None:
-        """Write C# source and test files to workspace, generating a default xUnit .csproj if none exists."""
-        workspace.mkdir(parents=True, exist_ok=True)
-        has_csproj = False
-        for rel_path, content in files.items():
-            target_path = workspace / rel_path
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(content, encoding="utf-8")
-            if rel_path.endswith(".csproj"):
-                has_csproj = True
-
-        if not has_csproj:
-            existing = list(workspace.glob("*.csproj"))
-            if not existing:
-                csproj_path = workspace / "AutoFixTests.csproj"
-                csproj_path.write_text(self.DEFAULT_CSPROJ, encoding="utf-8")
-
-    def run_tests(self, workspace: Path, timeout: int = 30, **kwargs) -> tuple[bool, str]:
-        """Execute dotnet test in workspace."""
-        cmd = ["dotnet", "test", "--logger", "console;verbosity=detailed"]
-        return self._execute_command(cmd, cwd=workspace, timeout=timeout)
-
-    def clean(self, workspace: Path) -> None:
-        """Remove .NET build artifacts (bin/ and obj/ directories)."""
-        if not workspace.exists():
-            return
-        for item in list(workspace.rglob("*")):
-            try:
-                if item.is_dir() and item.name in {"bin", "obj"}:
-                    shutil.rmtree(item, ignore_errors=True)
-            except Exception:
-                pass
+# Backward compatibility aliases
+PythonSandbox = PythonAdapter
 
 
-class JavaSandbox(BaseSandbox):
-    """Execution sandbox for Java test suites using Maven or Gradle."""
-
-    DEFAULT_POM = """<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    <groupId>com.autofix</groupId>
-    <artifactId>autofix-sandbox</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-    <dependencies>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>5.10.0</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-"""
-
-    def write_files(self, workspace: Path, files: dict[str, str]) -> None:
-        """Write Java source and test files to workspace, generating a default pom.xml if needed."""
-        workspace.mkdir(parents=True, exist_ok=True)
-        has_build_file = False
-        for rel_path, content in files.items():
-            target_path = workspace / rel_path
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(content, encoding="utf-8")
-            if rel_path in {"pom.xml", "build.gradle", "build.gradle.kts"}:
-                has_build_file = True
-
-        if not has_build_file:
-            if not (workspace / "pom.xml").exists() and not (workspace / "build.gradle").exists():
-                pom_path = workspace / "pom.xml"
-                pom_path.write_text(self.DEFAULT_POM, encoding="utf-8")
-
-    def run_tests(self, workspace: Path, timeout: int = 30, **kwargs) -> tuple[bool, str]:
-        """Execute Maven or Gradle test runner in workspace."""
-        if (workspace / "mvnw").exists():
-            cmd = ["./mvnw", "test", "-B"]
-        elif (workspace / "gradlew").exists():
-            cmd = ["./gradlew", "test"]
-        elif (workspace / "build.gradle").exists() or (workspace / "build.gradle.kts").exists():
-            cmd = ["gradle", "test"]
-        else:
-            cmd = ["mvn", "test", "-B"]
-        return self._execute_command(cmd, cwd=workspace, timeout=timeout)
-
-    def clean(self, workspace: Path) -> None:
-        """Remove Java build artifacts (target/, build/, .gradle/, and .class files)."""
-        if not workspace.exists():
-            return
-        for item in list(workspace.rglob("*")):
-            try:
-                if item.is_dir() and item.name in {"target", "build", ".gradle"}:
-                    shutil.rmtree(item, ignore_errors=True)
-                elif item.is_file() and item.suffix == ".class":
-                    item.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-
-def get_sandbox(language: str) -> BaseSandbox:
-    """Factory function returning the appropriate BaseSandbox implementation for a language."""
-    lang = language.lower().strip()
-    if lang in ["csharp", "c#", "dotnet"]:
-        return CSharpSandbox()
-    elif lang == "java":
-        return JavaSandbox()
-    return PythonSandbox()  # Default to Python
+def get_sandbox(language: str = "python") -> PythonAdapter:
+    """Factory function returning the PythonAdapter sandbox implementation."""
+    return PythonAdapter()

@@ -48,11 +48,11 @@ async def test_run_healing_pipeline_first_pass_success(tmp_path: Path):
 
     with patch.object(settings, "WORKSPACE_DIR", tmp_path), \
          patch("app.services.orchestrator.call_gemini", new_callable=AsyncMock) as mock_gemini, \
-         patch("app.services.orchestrator.get_sandbox") as mock_get_sandbox:
+         patch("app.services.orchestrator.PythonAdapter") as mock_adapter_cls:
 
         mock_sandbox = MagicMock()
         mock_sandbox.run_tests.return_value = (True, "1 passed in 0.01s")
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_adapter_cls.return_value = mock_sandbox
 
         mock_gemini.return_value = "```python\ndef test_add():\n    from target import add\n    assert add(1, 2) == 3\n```"
 
@@ -75,7 +75,7 @@ async def test_run_healing_pipeline_self_healing_success(tmp_path: Path):
 
     with patch.object(settings, "WORKSPACE_DIR", tmp_path), \
          patch("app.services.orchestrator.call_gemini", new_callable=AsyncMock) as mock_gemini, \
-         patch("app.services.orchestrator.get_sandbox") as mock_get_sandbox:
+         patch("app.services.orchestrator.PythonAdapter") as mock_adapter_cls:
 
         mock_sandbox = MagicMock()
         # First run fails, second run passes
@@ -83,7 +83,7 @@ async def test_run_healing_pipeline_self_healing_success(tmp_path: Path):
             (False, "FAILED test_add - AssertionError: -1 != 3"),
             (True, "1 passed in 0.02s"),
         ]
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_adapter_cls.return_value = mock_sandbox
 
         # 1st LLM call is test generation, 2nd LLM call is healer
         mock_gemini.side_effect = [
@@ -108,14 +108,14 @@ async def test_run_repo_healing_pipeline(tmp_path: Path):
     failing_file.write_text("def calc(): return 0", encoding="utf-8")
 
     with patch("app.services.orchestrator.call_gemini", new_callable=AsyncMock) as mock_gemini, \
-         patch("app.services.orchestrator.get_sandbox") as mock_get_sandbox, \
+         patch("app.services.orchestrator.PythonAdapter") as mock_adapter_cls, \
          patch("app.services.orchestrator.RepoAnalyzer.extract_relevant_context") as mock_extract:
 
         mock_extract.return_value = {"service.py": "def calc(): return 0"}
 
         mock_sandbox = MagicMock()
         mock_sandbox.run_tests.return_value = (True, "All repo tests passed!")
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_adapter_cls.return_value = mock_sandbox
 
         mock_gemini.return_value = "```python\ndef calc():\n    return 42\n```"
 
@@ -141,13 +141,13 @@ async def test_run_repo_healing_pipeline_targets_test_order_processor(tmp_path: 
     (repo_dir / "test_order_processor.py").write_text("def test_proc(): pass", encoding="utf-8")
 
     with patch("app.services.orchestrator.call_gemini", new_callable=AsyncMock) as mock_gemini, \
-         patch("app.services.orchestrator.get_sandbox") as mock_get_sandbox, \
+         patch("app.services.orchestrator.PythonAdapter") as mock_adapter_cls, \
          patch("app.services.orchestrator.RepoAnalyzer.extract_relevant_context") as mock_extract:
 
         mock_extract.return_value = {"order_processor.py": "def process_order(): pass"}
         mock_sandbox = MagicMock()
         mock_sandbox.run_tests.return_value = (True, "3 passed in 0.01s")
-        mock_get_sandbox.return_value = mock_sandbox
+        mock_adapter_cls.return_value = mock_sandbox
         mock_gemini.return_value = "```python\ndef process_order(): return {'status': 'ok'}\n```"
 
         response = await run_repo_healing_pipeline(
@@ -187,5 +187,60 @@ def test_python_sandbox_pytest_discovery_and_overrides(tmp_path: Path):
         assert "test_order_processor.py" in cmd
         assert "-o" in cmd
         assert "testpaths=." in cmd
+        assert kwargs["env"]["PYTHONPATH"] == str(workspace.resolve())
+
+
+@pytest.mark.anyio
+async def test_python_sandbox_create_subprocess_exec(tmp_path: Path):
+    """Test PythonSandbox.create_subprocess_exec executes with correct cmd and env."""
+    from app.services.sandboxes.adapters import PythonSandbox, PythonAdapter
+    assert PythonAdapter is PythonSandbox
+
+    sandbox = PythonSandbox()
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"test passed", b""))
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        passed, output = await sandbox.create_subprocess_exec(
+            repo_dir=workspace,
+            test_file="tests/test_event_formatter.py",
+        )
+
+        assert passed is True
+        assert "test passed" in output
+        mock_exec.assert_called_once()
+        cmd_args = mock_exec.call_args[0]
+        kwargs = mock_exec.call_args[1]
+
+        assert "tests/test_event_formatter.py" in cmd_args
+        assert "-v" in cmd_args
+        assert kwargs["cwd"] == str(workspace.resolve())
+        assert kwargs["env"]["PYTHONPATH"] == str(workspace.resolve())
+
+
+def test_python_sandbox_targets_event_formatter(tmp_path: Path):
+    """Test PythonSandbox defaults to tests/test_event_formatter.py when event_formatter is target."""
+    from app.services.sandboxes.adapters import PythonSandbox
+
+    sandbox = PythonSandbox()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with patch.object(sandbox, "_execute_command") as mock_exec:
+        mock_exec.return_value = (True, "2 passed")
+
+        passed, output = sandbox.run_tests(workspace, test_file="event_formatter.py")
+        assert passed is True
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[0][0]
+        kwargs = mock_exec.call_args[1]
+
+        assert "tests/test_event_formatter.py" in cmd
+        assert "-v" in cmd
         assert kwargs["env"]["PYTHONPATH"] == str(workspace.resolve())
 

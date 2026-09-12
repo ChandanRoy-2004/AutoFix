@@ -5,8 +5,8 @@ import subprocess
 import sys
 
 
-class BaseSandbox(ABC):
-    """Abstract base class defining the interface for language-specific execution sandboxes."""
+class BaseSandboxAdapter(ABC):
+    """Abstract base class defining the interface for execution sandboxes."""
 
     @abstractmethod
     def write_files(self, workspace: Path, files: dict[str, str]) -> None:
@@ -46,3 +46,7 @@ class BaseSandbox(ABC):
             return False, f"Execution timed out after {timeout} seconds."
         except Exception as e:
             return False, f"Sandbox execution error: {str(e)}"
+
+
+# Alias for backward compatibility
+BaseSandbox = BaseSandboxAdapter
