@@ -147,22 +147,24 @@ async def process_pr_healing(
             logger.error(f"[GITHUB_BOT] Failed to clone {repo_full_name} ({branch})")
             return
 
-        # 3. Dynamic test target selection
-        test_file = temp_dir / "tests" / "test_payload_validator.py"
-        if not test_file.exists():
-            # Fallback to any new test file in tests/
-            test_target = "tests"
-        else:
-            test_target = "tests/test_payload_validator.py"
+        # Locate test files in the cloned repository
+        test_dir = temp_dir / "tests"
+        candidate_tests = [
+            str(p.relative_to(temp_dir))
+            for p in test_dir.glob("test_*.py")
+            if not any(excluded in p.name for excluded in ["e2e", "github", "orchestrator", "phase2", "llm_client"])
+        ]
+
+        # Target specific candidate tests or default to root tests directory
+        test_target = candidate_tests if candidate_tests else ["tests"]
 
         test_cmd = [
             sys.executable, "-m", "pytest",
-            test_target,
+            *test_target,
             "-v",
         ]
 
-        print(f"[PREFLIGHT] Executing: {' '.join(test_cmd)} in {temp_dir}", flush=True)
-
+        logger.info(f"[PREFLIGHT] Running tests: {' '.join(test_cmd)}")
         result = subprocess.run(
             test_cmd,
             cwd=str(temp_dir),
@@ -170,19 +172,40 @@ async def process_pr_healing(
             text=True,
             env={**os.environ, "PYTHONPATH": str(temp_dir.resolve())},
         )
+        logger.info(f"[PREFLIGHT] Return code: {result.returncode}")
+        logger.info(f"[PREFLIGHT] Stdout:\n{result.stdout}")
+        logger.info(f"[PREFLIGHT] Stderr:\n{result.stderr}")
 
-        print(f"[PREFLIGHT] Return code: {result.returncode}", flush=True)
-        print(f"[PREFLIGHT] Stdout:\n{result.stdout}", flush=True)
-
-        # Only exit early if returncode is explicitly 0 (all tests passed)
         if result.returncode == 0:
-            print(f"[GITHUB_BOT] Repository at {branch} is already healthy and all tests pass! Exiting without changes.", flush=True)
+            logger.info(f"[GITHUB_BOT] Repository at {branch} is already healthy and all tests pass! Exiting without changes.")
             return
 
-        print(f"[GITHUB_BOT] Pre-flight failed as expected. Triggering self-healing...", flush=True)
-
-        failing_file = "app/utils/payload_validator.py"
         failing_logs = (result.stderr or "") + "\n" + (result.stdout or "")
+
+        # Match failing file from candidate files or default to matching slug cleaner / validator
+        failing_file = None
+        for test_path in candidate_tests:
+            # e.g., tests/test_slug_cleaner.py -> app/utils/slug_cleaner.py
+            stem = Path(test_path).stem.replace("test_", "")
+            possible_targets = [
+                f"app/utils/{stem}.py",
+                f"app/services/{stem}.py",
+                f"app/{stem}.py",
+            ]
+            for pt in possible_targets:
+                if (temp_dir / pt).exists():
+                    failing_file = pt
+                    break
+            if failing_file:
+                break
+
+        if not failing_file:
+            if "payload_validator" in failing_logs or any("payload_validator" in t for t in candidate_tests):
+                failing_file = "app/utils/payload_validator.py"
+            else:
+                failing_file = "app/utils/slug_cleaner.py"
+
+        logger.info(f"[ORCHESTRATOR] Identified target file: {failing_file}")
         response = await run_repo_healing_pipeline(
             repo_dir=temp_dir.resolve(),
             language="python",
