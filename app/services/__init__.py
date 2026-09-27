@@ -1,7 +1,8 @@
-from app.services.github_service import GitHubService
+from app.services.github_service import GitHubService, build_healing_audit_report
 from app.services.llm_client import call_gemini, get_client, get_genai_client
 from app.services.orchestrator import (
     clean_code_fences,
+    extract_test_summary,
     run_healing_pipeline,
     run_repo_healing_pipeline,
 )
@@ -23,8 +24,10 @@ __all__ = [
     "PythonAdapter",
     "PythonSandbox",
     "RepoAnalyzer",
+    "build_healing_audit_report",
     "call_gemini",
     "clean_code_fences",
+    "extract_test_summary",
     "get_client",
     "get_genai_client",
     "get_sandbox",

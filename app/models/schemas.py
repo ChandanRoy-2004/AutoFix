@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -78,3 +79,77 @@ class HealResponse(BaseModel):
         default_factory=list,
         description="Ordered list of log entries and trace events from the healing loop",
     )
+    failing_file: str = Field(
+        default="",
+        description="Target failing file or module",
+    )
+    model_name: str = Field(
+        default="",
+        description="LLM engine used for healing",
+    )
+    max_iterations: int = Field(
+        default=3,
+        description="Maximum iterations allowed",
+    )
+    ast_dependencies: list[str] = Field(
+        default_factory=list,
+        description="Interdependent modules extracted by AST analyzer",
+    )
+    test_target: str = Field(
+        default="",
+        description="Test target verified",
+    )
+    audit_report: str = Field(
+        default="",
+        description="Pre-rendered autonomous healing audit report",
+    )
+    failure_logs: str = Field(
+        default="",
+        description="Initial failure traceback and error logs",
+    )
+    iterations: int = Field(
+        default=0,
+        description="Total number of healing iterations executed",
+    )
+    patched_code: str = Field(
+        default="",
+        description="Applied code patch implementation",
+    )
+    model_used: str = Field(
+        default="",
+        description="LLM engine used for healing",
+    )
+    test_summary: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Mapping of individual test cases to initial status vs final status",
+    )
+
+    def model_post_init(self, __context) -> None:
+        if self.iterations == 0 and self.iterations_used > 0:
+            self.iterations = self.iterations_used
+        if not self.model_used and self.model_name:
+            self.model_used = self.model_name
+        if not self.model_name and self.model_used:
+            self.model_name = self.model_used
+        if not self.patched_code and self.patches:
+            self.patched_code = self.patches[0].patched_content
+
+    def __getitem__(self, item: str):
+        if hasattr(self, item):
+            return getattr(self, item)
+        raise KeyError(item)
+
+    def get(self, item: str, default=None):
+        return getattr(self, item, default)
+
+    def __contains__(self, item: str) -> bool:
+        return hasattr(self, item)
+
+    def keys(self):
+        return self.model_dump().keys()
+
+    def values(self):
+        return self.model_dump().values()
+
+    def items(self):
+        return self.model_dump().items()

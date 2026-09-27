@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 import pytest
 
-from app.api.github_routes import process_pr_healing, verify_signature
+from app.api.github_routes import extract_failing_file, process_pr_healing, verify_signature
 from app.core.config import settings
 from app.models.schemas import HealResponse
 from app.main import app
@@ -154,6 +154,7 @@ async def test_process_pr_healing_success(tmp_path: Path):
         mock_gh = MagicMock()
         mock_gh.get_installation_access_token = AsyncMock(return_value="test_token_123")
         mock_gh.clone_repo = MagicMock(return_value=True)
+        mock_gh.clone_repository = AsyncMock(return_value=True)
         mock_gh.commit_and_push_patch = MagicMock(return_value=True)
         mock_gh.format_pr_comment = MagicMock(return_value="## PR Comment Report")
         mock_gh.post_pr_comment = AsyncMock(return_value=True)
@@ -161,7 +162,7 @@ async def test_process_pr_healing_success(tmp_path: Path):
 
         mock_subproc = MagicMock()
         mock_subproc.returncode = 1
-        mock_subproc.stdout = "FAILED tests/test_event_formatter.py - AssertionError"
+        mock_subproc.stdout = "FAILED tests/test_payload_validator.py - AssertionError"
         mock_subproc.stderr = "traceback error"
         mock_subproc_run.return_value = mock_subproc
 
@@ -175,22 +176,22 @@ async def test_process_pr_healing_success(tmp_path: Path):
         )
 
         mock_gh.get_installation_access_token.assert_awaited_once_with(456)
-        mock_gh.clone_repo.assert_called_once_with(
-            repo_url="https://github.com/org/test-repo.git",
+        mock_gh.clone_repository.assert_awaited_once_with(
+            repo_full_name="org/test-repo",
             branch="feature/order-processor",
-            target_dir=Path("workspace/pr_88"),
-            token="test_token_123",
+            destination=Path("workspace/pr_88"),
+            installation_id=456,
         )
         mock_run_healing.assert_awaited_once_with(
             repo_dir=Path("workspace/pr_88").resolve(),
             language="python",
-            failing_file="app/utils/event_formatter.py",
-            failing_logs="traceback error\nFAILED tests/test_event_formatter.py - AssertionError",
+            failing_file="app/utils/payload_validator.py",
+            failing_logs="traceback error\nFAILED tests/test_payload_validator.py - AssertionError",
         )
         mock_gh.commit_and_push_patch.assert_called_once_with(
             Path("workspace/pr_88"),
             "feature/order-processor",
-            "fix(autofix): resolve edge case in audit event formatter",
+            "fix(autofix): resolve edge case in payload_validator",
             "test_token_123",
         )
         mock_gh.post_pr_comment.assert_awaited_once_with(
@@ -212,6 +213,7 @@ async def test_process_pr_healing_already_healthy():
         mock_gh = MagicMock()
         mock_gh.get_installation_access_token = AsyncMock(return_value="test_token_123")
         mock_gh.clone_repo = MagicMock(return_value=True)
+        mock_gh.clone_repository = AsyncMock(return_value=True)
         mock_gh_cls.return_value = mock_gh
 
         mock_subproc = MagicMock()
@@ -269,6 +271,7 @@ async def test_process_pr_healing_clone_failure():
         mock_gh = MagicMock()
         mock_gh.get_installation_access_token = AsyncMock(return_value="test_token_123")
         mock_gh.clone_repo = MagicMock(return_value=False)
+        mock_gh.clone_repository = AsyncMock(return_value=False)
         mock_gh_cls.return_value = mock_gh
 
         await process_pr_healing(
@@ -282,4 +285,158 @@ async def test_process_pr_healing_clone_failure():
         mock_gh.commit_and_push_patch.assert_not_called()
         mock_gh.post_pr_comment.assert_not_called()
         assert not Path("workspace/pr_89").exists()
+
+
+def test_extract_failing_file():
+    """Verify extract_failing_file extracts source target from tracebacks or defaults to payload_validator.py."""
+    # Traceback mentioning payload_validator.py
+    tb_payload = """
+Traceback (most recent call last):
+  File "/repo/tests/test_payload_validator.py", line 29, in test_extract_repo_metadata
+    meta = extract_repo_metadata(payload)
+  File "/repo/app/utils/payload_validator.py", line 11, in extract_repo_metadata
+    owner_login = repo_info["owner"]["login"]
+TypeError: string indices must be integers, not 'str'
+"""
+    assert extract_failing_file(tb_payload) == "app/utils/payload_validator.py"
+
+    # Traceback mentioning event_formatter.py
+    tb_event = """
+FAILED tests/test_event_formatter.py - AssertionError: formatting failed
+"""
+    assert extract_failing_file(tb_event) == "app/utils/event_formatter.py"
+
+    # Arbitrary log fallback
+    tb_generic = "Some random error traceback with no recognized source files"
+    assert extract_failing_file(tb_generic) == "app/utils/payload_validator.py"
+    assert extract_failing_file("") == "app/utils/payload_validator.py"
+
+
+@pytest.mark.anyio
+async def test_process_pr_healing_dynamic_discovery():
+    """Verify process_pr_healing invokes pytest with dynamic testpaths and exclusion filter."""
+    import sys
+
+    mock_response = HealResponse(
+        success=True,
+        iterations_used=1,
+        final_code="code",
+        generated_tests="",
+        language="python",
+        patches=[],
+        logs=[],
+    )
+
+    with patch("app.api.github_routes.GitHubService") as mock_gh_cls, \
+         patch("app.api.github_routes.subprocess.run") as mock_subproc_run, \
+         patch("app.api.github_routes.run_repo_healing_pipeline", new_callable=AsyncMock) as mock_run_healing:
+
+        mock_gh = MagicMock()
+        mock_gh.get_installation_access_token = AsyncMock(return_value="test_token_123")
+        mock_gh.clone_repo = MagicMock(return_value=True)
+        mock_gh.clone_repository = AsyncMock(return_value=True)
+        mock_gh.commit_and_push_patch = MagicMock(return_value=True)
+        mock_gh.format_pr_comment = MagicMock(return_value="## Report")
+        mock_gh.post_pr_comment = AsyncMock(return_value=True)
+        mock_gh_cls.return_value = mock_gh
+
+        mock_subproc = MagicMock()
+        mock_subproc.returncode = 1
+        mock_subproc.stdout = "FAILED tests/test_payload_validator.py - TypeError"
+        mock_subproc.stderr = "File \"app/utils/payload_validator.py\", line 11, in extract_repo_metadata"
+        mock_subproc_run.return_value = mock_subproc
+
+        mock_run_healing.return_value = mock_response
+
+        await process_pr_healing(
+            repo_full_name="org/test-repo",
+            branch="feature/payload-validator-test",
+            pr_number=90,
+            installation_id=789,
+        )
+
+        mock_subproc_run.assert_called_once()
+        called_cmd = mock_subproc_run.call_args[0][0]
+        assert called_cmd == [
+            sys.executable, "-m", "pytest",
+            "tests",
+            "-v",
+        ]
+
+        mock_run_healing.assert_awaited_once_with(
+            repo_dir=Path("workspace/pr_90").resolve(),
+            language="python",
+            failing_file="app/utils/payload_validator.py",
+            failing_logs="File \"app/utils/payload_validator.py\", line 11, in extract_repo_metadata\nFAILED tests/test_payload_validator.py - TypeError",
+        )
+
+
+@pytest.mark.anyio
+async def test_process_pr_healing_targets_payload_validator_when_file_exists():
+    """Verify pre-flight test command targets tests/test_payload_validator.py directly when present."""
+    import sys
+
+    mock_response = HealResponse(
+        success=True,
+        iterations_used=1,
+        final_code="code",
+        generated_tests="",
+        language="python",
+        patches=[],
+        logs=[],
+    )
+
+    async def fake_clone(*args, **kwargs):
+        dest = kwargs.get("destination") or kwargs.get("target_dir")
+        if dest is None and len(args) >= 3:
+            dest = args[2]
+        target = Path(dest)
+        (target / "tests").mkdir(parents=True, exist_ok=True)
+        (target / "tests" / "test_payload_validator.py").write_text("def test_dummy(): pass", encoding="utf-8")
+        return True
+
+    with patch("app.api.github_routes.GitHubService") as mock_gh_cls, \
+         patch("app.api.github_routes.subprocess.run") as mock_subproc_run, \
+         patch("app.api.github_routes.run_repo_healing_pipeline", new_callable=AsyncMock) as mock_run_healing:
+
+        mock_gh = MagicMock()
+        mock_gh.get_installation_access_token = AsyncMock(return_value="test_token_123")
+        mock_gh.clone_repo = MagicMock(side_effect=fake_clone)
+        mock_gh.clone_repository = AsyncMock(side_effect=fake_clone)
+        mock_gh.commit_and_push_patch = MagicMock(return_value=True)
+        mock_gh.format_pr_comment = MagicMock(return_value="## Report")
+        mock_gh.post_pr_comment = AsyncMock(return_value=True)
+        mock_gh_cls.return_value = mock_gh
+
+        mock_subproc = MagicMock()
+        mock_subproc.returncode = 1
+        mock_subproc.stdout = "FAILED tests/test_payload_validator.py - TypeError"
+        mock_subproc.stderr = "Traceback error in payload_validator.py"
+        mock_subproc_run.return_value = mock_subproc
+
+        mock_run_healing.return_value = mock_response
+
+        await process_pr_healing(
+            repo_full_name="org/test-repo",
+            branch="feature/payload-validator-test",
+            pr_number=91,
+            installation_id=789,
+        )
+
+        mock_subproc_run.assert_called_once()
+        called_cmd = mock_subproc_run.call_args[0][0]
+        assert called_cmd == [
+            sys.executable, "-m", "pytest",
+            "tests/test_payload_validator.py",
+            "-v",
+        ]
+
+        mock_run_healing.assert_awaited_once_with(
+            repo_dir=Path("workspace/pr_91").resolve(),
+            language="python",
+            failing_file="app/utils/payload_validator.py",
+            failing_logs="Traceback error in payload_validator.py\nFAILED tests/test_payload_validator.py - TypeError",
+        )
+
+
 

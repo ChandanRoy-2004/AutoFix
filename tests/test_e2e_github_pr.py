@@ -151,10 +151,13 @@ async def test_e2e_full_pr_healing_and_comment_flow(tmp_path: Path):
     )
 
     # 6. Assertions on comment Markdown structure and contents
-    assert "| Metric | Value |" in comment_md
-    assert "| **Status** | ✅ Passed |" in comment_md
-    assert "| **Iterations Used** | 1 |" in comment_md
-    assert "calculator.py" in comment_md
+    assert "## 🤖 AutoFix Autonomous Healing Report" in comment_md
+    assert "| Metric | Status |" in comment_md
+    assert "| **Status** | Verified Passing ✅ |" in comment_md
+    assert "| **Iterations Required** | `1 / 3` |" in comment_md
+    assert "| **Target Module** | `calculator.py` |" in comment_md
+    assert "### 🔍 AST Dependency Scope" in comment_md
+    assert "### 🧪 Test Verification Suite" in comment_md
     assert "return a + b" in comment_md
-    assert "### 🧪 Test Logs" in comment_md
-    assert "passed" in comment_md.lower()
+    assert "<details>" in comment_md
+    assert "</details>" in comment_md

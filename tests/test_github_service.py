@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -61,6 +62,51 @@ def test_generate_jwt_success(rsa_key_pair):
         assert "iat" in decoded
         assert "exp" in decoded
         assert decoded["exp"] - decoded["iat"] == 600
+
+
+def test_generate_jwt_from_content_with_literal_newlines(rsa_key_pair):
+    key_file, public_pem = rsa_key_pair
+    raw_key = Path(key_file).read_text(encoding="utf-8")
+    # Simulate single-line env var with literal \n
+    literal_escaped_key = raw_key.replace("\n", "\\n")
+
+    service = GitHubService()
+    with patch.object(settings, "GITHUB_APP_ID", "987654"), \
+         patch.object(settings, "GITHUB_PRIVATE_KEY_CONTENT", literal_escaped_key), \
+         patch.object(settings, "GITHUB_PRIVATE_KEY_PATH", None):
+        token = service._generate_jwt()
+        assert token != ""
+
+        decoded = jwt.decode(token, public_pem, algorithms=["RS256"])
+        assert decoded["iss"] == "987654"
+
+
+def test_generate_jwt_from_env_var(rsa_key_pair, monkeypatch):
+    key_file, public_pem = rsa_key_pair
+    raw_key = Path(key_file).read_text(encoding="utf-8")
+
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_CONTENT", raw_key)
+    service = GitHubService()
+    with patch.object(settings, "GITHUB_APP_ID", "987654"), \
+         patch.object(settings, "GITHUB_PRIVATE_KEY_CONTENT", None), \
+         patch.object(settings, "GITHUB_PRIVATE_KEY_PATH", None):
+        token = service._generate_jwt()
+        assert token != ""
+
+        decoded = jwt.decode(token, public_pem, algorithms=["RS256"])
+        assert decoded["iss"] == "987654"
+
+
+def test_generate_jwt_raises_value_error_when_no_key():
+    service = GitHubService()
+    with patch.object(settings, "GITHUB_PRIVATE_KEY_CONTENT", None), \
+         patch.object(settings, "GITHUB_PRIVATE_KEY_PATH", None), \
+         patch.dict("os.environ", {}, clear=False):
+        if "GITHUB_PRIVATE_KEY_CONTENT" in os.environ:
+            del os.environ["GITHUB_PRIVATE_KEY_CONTENT"]
+        with pytest.raises(ValueError, match="No GitHub App private key found in environment or file path."):
+            service._generate_jwt()
+
 
 
 @pytest.mark.anyio
