@@ -35,7 +35,66 @@ By upgrading the traditional automated testing mindset (like Selenium or TestNG)
 
 AutoFix uses a **Layered Service Architecture**, separating HTTP routing, data validation, pure business logic, and AI prompt engineering.
 
-![AutoFix System Architecture Diagram](pro.png)
+```mermaid
+flowchart LR
+    %% Direction: Left to Right for Horizontal Readability
+    
+    subgraph Ingestion ["1. Event Ingestion"]
+        direction TB
+        PR["🔀 PR Event<br><i>opened or sync</i>"] -->|Webhook Payload| GH_App["⚡ GitHub App"]
+        GH_App -->|POST Event| Endpoint["🌐 /api/github/webhook"]
+        Endpoint --> AuthCheck{"🔐 HMAC Check"}
+        AuthCheck -->|Valid| Accept["✅ 202 Accepted"]
+        AuthCheck -->|Invalid| Reject["❌ 401 Unauthorized"]
+    end
+
+    subgraph PreFlight ["2. Pre-Flight Check"]
+        direction TB
+        Accept -->|Trigger| BGTask["⚙️ Background Task"]
+        BGTask --> GitClone["📦 Clone PR Branch"]
+        GitClone --> RunPytest["🧪 Run pytest"]
+        RunPytest --> CheckStatus{"🔍 Tests Passed?"}
+        CheckStatus -->|Yes| CleanExit["🟢 Healthy Exit"]
+    end
+
+    subgraph HealingLoop ["3. Gemini Healing Loop"]
+        direction TB
+        CheckStatus -->|No| Extract["📑 Extract Trace"]
+        Extract --> Prompt["📝 Construct Prompt"]
+        Prompt --> Gemini["🤖 Gemini AI"]
+        Gemini --> Patch["💡 Generate Patch"]
+    end
+
+    subgraph Verification ["4. Closed-Loop Verification"]
+        direction TB
+        Patch --> Apply["🛠️ Apply Patch"]
+        Apply --> ReTest["🔄 Re-test & AST Check"]
+        ReTest --> ReTestStatus{"🔍 Tests Passed?"}
+        ReTestStatus -->|Retry| Gemini
+    end
+
+    subgraph PRFeedback ["5. PR Feedback"]
+        direction TB
+        ReTestStatus -->|Yes| Push["🚀 Commit & Push Fix"]
+        Push --> Comment["💬 PR Audit Comment"]
+    end
+
+    %% Color Styling & Themes
+    classDef default fill:#1f2937,stroke:#374151,color:#f3f4f6;
+    classDef ingestion fill:#1e3a8a,stroke:#3b82f6,color:#eff6ff;
+    classDef security fill:#78350f,stroke:#d97706,color:#fef3c7;
+    classDef execution fill:#0f766e,stroke:#14b8a6,color:#ccfbf1;
+    classDef ai fill:#581c87,stroke:#a855f7,color:#f3e8ff;
+    classDef success fill:#065f46,stroke:#10b981,color:#ecfdf5;
+    classDef failure fill:#991b1b,stroke:#ef4444,color:#fef2f2;
+
+    class PR,GH_App,Endpoint ingestion;
+    class AuthCheck,Accept security;
+    class BGTask,GitClone,RunPytest,CheckStatus,CleanExit execution;
+    class Extract,Prompt,Gemini,Patch ai;
+    class Apply,ReTest,ReTestStatus,Push,Comment success;
+    class Reject failure;
+```
 
 ### Directory Structure
 ```text
